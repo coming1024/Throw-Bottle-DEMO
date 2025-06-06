@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>发泄屋 Demo - Pointer Lock鼠标拖动旋转视角+扔瓶子</title>
+  <style>
+    body { margin: 0; overflow: hidden; cursor: crosshair; }
+    canvas { display: block; }
+    #instructions {
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      color: white;
+      font-family: sans-serif;
+      user-select: none;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div id="instructions">点击页面以锁定鼠标，拖动鼠标旋转视角，点击左键扔酒瓶。</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+<script>
+  // === 初始化三维场景 ===
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x222222);
+
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 1.6, 5);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // === 灯光 ===
+  const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+  light.position.set(0, 20, 0);
+  scene.add(light);
+
+  // === 地面 ===
+  const floorGeo = new THREE.PlaneGeometry(20, 20);
+  const floorMat = new THREE.MeshStandardMaterial({color:0x555555});
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  // === 物理世界 ===
+  const world = new CANNON.World();
+  world.gravity.set(0, -9.82, 0);
+
+  // 地面物理体
+  const groundBody = new CANNON.Body({mass:0});
+  const groundShape = new CANNON.Plane();
+  groundBody.addShape(groundShape);
+  groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+  world.addBody(groundBody);
+
+  // === 瓶子模板 ===
+  const bottleGeo = new THREE.BoxGeometry(0.3, 1, 0.3);
+  const bottleMat = new THREE.MeshStandardMaterial({color:0x8b0000});
+  const bottleShape = new CANNON.Box(new CANNON.Vec3(0.15, 0.5, 0.15));
+
+  const bottles = [];
+
+  // === 音效初始化 ===
+  const listener = new THREE.AudioListener();
+  camera.add(listener);
+  const breakSound = new THREE.Audio(listener);
+  const audioLoader = new THREE.AudioLoader();
+  audioLoader.load(
+    'https://cdn.jsdelivr.net/gh/jbrown/boom/audio/break.wav',
+    buffer => {
+      breakSound.setBuffer(buffer);
+      breakSound.setVolume(0.5);
+    }
+  );
+
+  // === 视角控制变量 ===
+  let pitch = 0;
+  let yaw = 0;
+
+  function updateCameraDirection() {
+    const x = Math.cos(pitch) * Math.cos(yaw);
+    const y = Math.sin(pitch);
+    const z = Math.cos(pitch) * Math.sin(yaw);
+    camera.lookAt(camera.position.x + x, camera.position.y + y, camera.position.z + z);
+  }
+  updateCameraDirection();
+
+  // === Pointer Lock 逻辑 ===
+  const instructions = document.getElementById('instructions');
+  document.body.requestPointerLock = document.body.requestPointerLock ||
+                                     document.body.mozRequestPointerLock ||
+                                     document.body.webkitRequestPointerLock;
+
+  document.body.addEventListener('click', () => {
+    document.body.requestPointerLock();
+  }, false);
+
+  function onPointerLockChange() {
+    if (document.pointerLockElement === document.body ||
+        document.mozPointerLockElement === document.body ||
+        document.webkitPointerLockElement === document.body) {
+      // 获得锁，开始监听鼠标移动
+      instructions.style.display = 'none';
+      document.addEventListener("mousemove", onMouseMove, false);
+    } else {
+      // 释放锁，停止监听鼠标移动
+      instructions.style.display = '';
+      document.removeEventListener("mousemove", onMouseMove, false);
+    }
+  }
+
+  function onPointerLockError() {
+    instructions.style.display = '';
+    alert('无法锁定鼠标！请在支持Pointer Lock的浏览器中使用此功能。');
+  }
+
+  document.addEventListener('pointerlockchange', onPointerLockChange, false);
+  document.addEventListener('mozpointerlockchange', onPointerLockChange, false);
+  document.addEventListener('webkitpointerlockchange', onPointerLockChange, false);
+
+  document.addEventListener('pointerlockerror', onPointerLockError, false);
+  document.addEventListener('mozpointerlockerror', onPointerLockError, false);
+  document.addEventListener('webkitpointerlockerror', onPointerLockError, false);
+
+  // 鼠标移动时更新视角
+  function onMouseMove(event) {
+    const movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+    const movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
+
+    const sensitivity = 0.0025;
+
+    yaw -= movementX * sensitivity;
+    pitch -= movementY * sensitivity;
+
+    const maxPitch = Math.PI / 2 * 0.95;
+    if (pitch > maxPitch) pitch = maxPitch;
+    if (pitch < -maxPitch) pitch = -maxPitch;
+
+    updateCameraDirection();
+  }
+
+  // === 扔瓶子 ===
+  function throwBottle() {
+    const bottleMesh = new THREE.Mesh(bottleGeo, bottleMat);
+    scene.add(bottleMesh);
+
+    const bottleBody = new CANNON.Body({mass:1});
+    bottleBody.addShape(bottleShape);
+
+    // 瓶子起点在摄像机前方一点位置
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+
+    const startPos = new THREE.Vector3();
+    startPos.copy(camera.position).add(forward.clone().multiplyScalar(1.2));
+    bottleBody.position.set(startPos.x, startPos.y, startPos.z);
+
+    // 将摄像机方向转成物理引擎的向量，用于投掷
+    const force = 15;
+    const impulse = new CANNON.Vec3(forward.x * force, forward.y * force, forward.z * force);
+    bottleBody.velocity.set(0, 0, 0); // 清零初速度
+    bottleBody.applyImpulse(impulse, bottleBody.position);
+
+    world.addBody(bottleBody);
+
+    bottles.push({mesh: bottleMesh, body: bottleBody});
+
+    // 播放碎裂声
+    if(breakSound.isPlaying){
+      breakSound.stop();
+    }
+    breakSound.play();
+  }
+
+  // 点击左键扔瓶子
+  window.addEventListener('mousedown', (e) => {
+    if(e.button === 0) { // 左键
+      throwBottle();
+    }
+  });
+
+  // === 动画循环 ===
+  const clock = new THREE.Clock();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const dt = clock.getDelta();
+    world.step(1/60, dt);
+
+    // 更新所有瓶子网格位置和旋转
+    for(let i = bottles.length - 1; i >= 0; i--){
+      const b = bottles[i];
+      b.mesh.position.copy(b.body.position);
+      b.mesh.quaternion.copy(b.body.quaternion);
+
+      // 瓶子掉落到地面以下时移除（优化）
+      if(b.body.position.y < -10){
+        world.removeBody(b.body);
+        scene.remove(b.mesh);
+        bottles.splice(i,1);
+      }
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+
+  // === 窗口自适应 ===
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script>
+</body>
+</html>

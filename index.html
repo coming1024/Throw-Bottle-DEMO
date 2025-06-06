@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>发泄屋 Demo - Classic Cannon.js</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+<!-- <script>
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x222222);
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 1.6, 5);
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // Light
+  const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+  light.position.set(0, 20, 0);
+  scene.add(light);
+
+  // Floor
+  const floorGeo = new THREE.PlaneGeometry(20, 20);
+  const floorMat = new THREE.MeshStandardMaterial({color:0x555555});
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  // Cannon physics world
+  const world = new CANNON.World();
+  world.gravity.set(0, -9.82, 0);
+
+  // Floor body
+  const groundBody = new CANNON.Body({mass:0});
+  const groundShape = new CANNON.Plane();
+  groundBody.addShape(groundShape);
+  groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+  world.addBody(groundBody);
+
+  // Bottle box
+  const bottleGeo = new THREE.BoxGeometry(0.3, 1, 0.3);
+  const bottleMat = new THREE.MeshStandardMaterial({color:0x8b0000});
+  const bottleMesh = new THREE.Mesh(bottleGeo, bottleMat);
+  scene.add(bottleMesh);
+
+  const bottleShape = new CANNON.Box(new CANNON.Vec3(0.15, 0.5, 0.15));
+  const bottleBody = new CANNON.Body({mass:1});
+  bottleBody.addShape(bottleShape);
+  bottleBody.position.set(0, 1.5, 0);
+  world.addBody(bottleBody);
+
+  // Animate
+  const clock = new THREE.Clock();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const dt = clock.getDelta();
+    world.step(1/60, dt);
+
+    bottleMesh.position.copy(bottleBody.position);
+    bottleMesh.quaternion.copy(bottleBody.quaternion);
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script> -->
+<!-- <script>
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x222222);
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 1.6, 5);
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // Light
+  const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+  light.position.set(0, 20, 0);
+  scene.add(light);
+
+  // Floor
+  const floorGeo = new THREE.PlaneGeometry(20, 20);
+  const floorMat = new THREE.MeshStandardMaterial({color:0x555555});
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  // Cannon physics world
+  const world = new CANNON.World();
+  world.gravity.set(0, -9.82, 0);
+
+  // Floor physics body
+  const groundBody = new CANNON.Body({mass:0});
+  const groundShape = new CANNON.Plane();
+  groundBody.addShape(groundShape);
+  groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+  world.addBody(groundBody);
+
+  // 瓶子模板，方便复制
+  const bottleGeo = new THREE.BoxGeometry(0.3, 1, 0.3);
+  const bottleMat = new THREE.MeshStandardMaterial({color:0x8b0000});
+  const bottleShape = new CANNON.Box(new CANNON.Vec3(0.15, 0.5, 0.15));
+
+  // 存储所有瓶子对象
+  const bottles = [];
+
+  // 音频相关
+  const listener = new THREE.AudioListener();
+  camera.add(listener);
+  const breakSound = new THREE.Audio(listener);
+  const audioLoader = new THREE.AudioLoader();
+  audioLoader.load(
+    'https://cdn.jsdelivr.net/gh/jbrown/boom/audio/break.wav', // 公开碎裂音效
+    buffer => {
+      breakSound.setBuffer(buffer);
+      breakSound.setVolume(0.5);
+    }
+  );
+
+  // 扔瓶子函数
+  function throwBottle() {
+    // 创建 THREE 网格
+    const bottleMesh = new THREE.Mesh(bottleGeo, bottleMat);
+    scene.add(bottleMesh);
+
+    // 创建 CANNON 刚体
+    const bottleBody = new CANNON.Body({mass:1});
+    bottleBody.addShape(bottleShape);
+
+    // 位置设置到摄像机前方1米处
+    const throwPos = new THREE.Vector3(0, 0, -1).applyMatrix4(camera.matrixWorld);
+    bottleBody.position.set(throwPos.x, throwPos.y, throwPos.z);
+
+    // 速度设为摄像机正前方方向*10（加点上抛）
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    bottleBody.velocity.set(forward.x * 10, forward.y * 10 + 2, forward.z * 10);
+
+    // 随机角速度，增加旋转
+    bottleBody.angularVelocity.set(Math.random()*10, Math.random()*10, Math.random()*10);
+
+    world.addBody(bottleBody);
+
+    bottles.push({mesh: bottleMesh, body: bottleBody, broken: false});
+
+    // 监听碰撞，落地碎裂
+    bottleBody.addEventListener('collide', event => {
+      // 判断是否碰到地面
+      if ((event.contact.bi === groundBody || event.contact.bj === groundBody) && !bottles.find(b => b.body === bottleBody).broken) {
+        breakSound.play();
+        bottles.find(b => b.body === bottleBody).broken = true;
+
+        // 移除瓶子物理和模型
+        scene.remove(bottleMesh);
+        world.removeBody(bottleBody);
+      }
+    });
+  }
+
+  // 鼠标点击扔瓶子
+  window.addEventListener('click', throwBottle);
+
+  // Animate loop
+  const clock = new THREE.Clock();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const dt = clock.getDelta();
+    world.step(1/60, dt);
+
+    // 同步所有瓶子mesh和物理体位置
+    for (const bottle of bottles) {
+      if (!bottle.broken) {
+        bottle.mesh.position.copy(bottle.body.position);
+        bottle.mesh.quaternion.copy(bottle.body.quaternion);
+      }
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script> -->
+<script>
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x222222);
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 1.6, 5);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // Light
+  const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+  light.position.set(0, 20, 0);
+  scene.add(light);
+
+  // Floor
+  const floorGeo = new THREE.PlaneGeometry(20, 20);
+  const floorMat = new THREE.MeshStandardMaterial({color:0x555555});
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  // Cannon physics world
+  const world = new CANNON.World();
+  world.gravity.set(0, -9.82, 0);
+
+  // Floor physics body
+  const groundBody = new CANNON.Body({mass:0});
+  const groundShape = new CANNON.Plane();
+  groundBody.addShape(groundShape);
+  groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+  world.addBody(groundBody);
+
+  // 瓶子模板，方便复制
+  const bottleGeo = new THREE.BoxGeometry(0.3, 1, 0.3);
+  const bottleMat = new THREE.MeshStandardMaterial({color:0x8b0000});
+  const bottleShape = new CANNON.Box(new CANNON.Vec3(0.15, 0.5, 0.15));
+
+  // 存储所有瓶子对象
+  const bottles = [];
+
+  // 音频相关
+  const listener = new THREE.AudioListener();
+  camera.add(listener);
+  const breakSound = new THREE.Audio(listener);
+  const audioLoader = new THREE.AudioLoader();
+  audioLoader.load(
+    'https://cdn.jsdelivr.net/gh/jbrown/boom/audio/break.wav',
+    buffer => {
+      breakSound.setBuffer(buffer);
+      breakSound.setVolume(0.5);
+    }
+  );
+
+  // 控制视角的变量
+  let isMouseDown = false;
+  let previousMouseX = 0;
+  let previousMouseY = 0;
+
+  // 俯仰和偏航角度（弧度）
+  let pitch = 0; // 上下
+  let yaw = 0;   // 左右
+
+  // 鼠标按下
+  window.addEventListener('mousedown', (e) => {
+    isMouseDown = true;
+    previousMouseX = e.clientX;
+    previousMouseY = e.clientY;
+  });
+
+  // 鼠标释放
+  window.addEventListener('mouseup', () => {
+    isMouseDown = false;
+  });
+
+  // 鼠标移动
+  window.addEventListener('mousemove', (e) => {
+    if (!isMouseDown) return;
+
+    const movementX = e.clientX - previousMouseX;
+    const movementY = e.clientY - previousMouseY;
+    previousMouseX = e.clientX;
+    previousMouseY = e.clientY;
+
+    // 调整灵敏度
+    const sensitivity = 0.002;
+
+    yaw -= movementX * sensitivity;
+    pitch -= movementY * sensitivity;
+
+    // 限制俯仰角度在[-85°, +85°]避免翻转
+    const maxPitch = Math.PI / 2 * 0.95;
+    if (pitch > maxPitch) pitch = maxPitch;
+    if (pitch < -maxPitch) pitch = -maxPitch;
+  });
+
+  // 更新摄像机方向
+  function updateCameraDirection() {
+    // 根据yaw/pitch计算摄像机前向向量
+    const x = Math.cos(pitch) * Math.sin(yaw);
+    const y = Math.sin(pitch);
+    const z = Math.cos(pitch) * Math.cos(yaw);
+
+    const lookDir = new THREE.Vector3(x, y, z);
+    const target = new THREE.Vector3();
+    target.copy(camera.position).add(lookDir);
+    camera.lookAt(target);
+  }
+
+  // 扔瓶子函数
+  function throwBottle() {
+    const bottleMesh = new THREE.Mesh(bottleGeo, bottleMat);
+    scene.add(bottleMesh);
+
+    const bottleBody = new CANNON.Body({mass:1});
+    bottleBody.addShape(bottleShape);
+
+    // 位置放摄像机前方1米处
+    const throwPos = new THREE.Vector3(0, 0, -1).applyMatrix4(camera.matrixWorld);
+    bottleBody.position.set(throwPos.x, throwPos.y, throwPos.z);
+
+    // 计算摄像机朝向向量
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    bottleBody.velocity.set(forward.x * 10, forward.y * 10 + 2, forward.z * 10);
+
+    // 随机角速度
+    bottleBody.angularVelocity.set(Math.random()*10, Math.random()*10, Math.random()*10);
+
+    world.addBody(bottleBody);
+
+    bottles.push({mesh: bottleMesh, body: bottleBody, broken: false});
+
+    bottleBody.addEventListener('collide', event => {
+      if ((event.contact.bi === groundBody || event.contact.bj === groundBody) && !bottles.find(b => b.body === bottleBody).broken) {
+        breakSound.play();
+        bottles.find(b => b.body === bottleBody).broken = true;
+
+        scene.remove(bottleMesh);
+        world.removeBody(bottleBody);
+      }
+    });
+  }
+
+  // 点击扔瓶子
+  window.addEventListener('click', throwBottle);
+
+  // Animate loop
+  const clock = new THREE.Clock();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const dt = clock.getDelta();
+    world.step(1/60, dt);
+
+    // 更新摄像机方向
+    updateCameraDirection();
+
+    // 同步瓶子位置和旋转
+    for (const bottle of bottles) {
+      if (!bottle.broken) {
+        bottle.mesh.position.copy(bottle.body.position);
+        bottle.mesh.quaternion.copy(bottle.body.quaternion);
+      }
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script>
+
+</body>
+</html>
