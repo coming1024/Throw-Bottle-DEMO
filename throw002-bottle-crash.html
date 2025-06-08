@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>发泄屋 Demo - 玻璃窗 + 可破坏碎片</title>
+  <title>发泄屋 Demo - 玻璃窗 + 可破坏碎片 + 酒瓶碰地破碎 + 酒瓶碎片清除</title>
   <style>
     body { margin: 0; overflow: hidden; cursor: crosshair; }
     canvas { display: block; }
@@ -108,6 +108,11 @@
   camera.add(armGroup);
   scene.add(camera);
 
+  //添加旋转体
+  const cameraHolder = new THREE.Object3D();  // 用于左右旋转
+  cameraHolder.add(camera);                  // camera 在内部上下旋转
+  scene.add(cameraHolder);
+
   // 添加玻璃窗
   const glassGeo = new THREE.PlaneGeometry(2, 2);
   const glassMat = new THREE.MeshStandardMaterial({ color: 0x88ccff, transparent: true, opacity: 0.4 });
@@ -126,17 +131,34 @@
 
   function throwBottle() {
     const mesh = new THREE.Mesh(bottleGeo, bottleMat);
-    const body = new CANNON.Body({
-      mass: 1,
-      shape: bottleShape,
-      position: new CANNON.Vec3(camera.position.x, camera.position.y, camera.position.z)
-    });
+    
+    // const body = new CANNON.Body({
+    //   mass: 1,
+    //   shape: bottleShape,
+    //   position: new CANNON.Vec3(camera.position.x, camera.position.y, camera.position.z)
+    // });
+
+    //新增代码
+    const worldPos = new THREE.Vector3();
+    camera.getWorldPosition(worldPos);
 
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
+
+    // 设置瓶子初始位置：摄像机正前方一小段距离
+    const spawnPos = worldPos.clone().add(forward.clone().multiplyScalar(1));
+
+      // 创建 Cannon.js 物理体
+    const body = new CANNON.Body({
+      mass: 1,
+      shape: bottleShape,
+      position: new CANNON.Vec3(spawnPos.x, spawnPos.y, spawnPos.z)
+    });
+
     forward.multiplyScalar(15);
     body.velocity.set(forward.x, forward.y, forward.z);
 
+    mesh.position.copy(spawnPos);//
     scene.add(mesh);
     world.addBody(body);
     bottles.push({ mesh, body });
@@ -185,6 +207,12 @@
 
           world.addBody(shardBody);
           bottles.push({ mesh: shard, body: shardBody });
+
+          // 新增：1秒后移除碎片，减少页面卡顿
+          setTimeout(() => {
+            scene.remove(shard);
+            world.removeBody(shardBody);
+          }, 1000);
         }
       }
     });
@@ -212,6 +240,12 @@
       });
       world.addBody(shardBody);
       bottles.push({ mesh: shard, body: shardBody });
+
+      // 新增：1秒后移除碎片，减少页面卡顿
+      setTimeout(() => {
+        scene.remove(shard);
+        world.removeBody(shardBody);
+      }, 1000);
     }
   }
 
@@ -235,8 +269,12 @@
   document.addEventListener('mousemove', e => {
     if (controls.enabled) {
       controls.yaw -= e.movementX * 0.002;
-      // controls.pitch -= e.movementY * 0.002; // 原代码注释掉了pitch
-      camera.rotation.y = controls.yaw;
+      controls.pitch -= e.movementY * 0.002; // 原代码注释掉了pitch
+    // //   camera.rotation.y = controls.yaw;
+    //   camera.rotation.set(0, controls.yaw, 0);
+      controls.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, controls.pitch));
+      cameraHolder.rotation.y = controls.yaw;
+      camera.rotation.x = controls.pitch;
     }
   });
 
