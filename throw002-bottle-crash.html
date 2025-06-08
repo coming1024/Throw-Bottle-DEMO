@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>发泄屋 Demo - 玻璃窗 + 可破坏碎片</title>
+  <style>
+    body { margin: 0; overflow: hidden; cursor: crosshair; }
+    canvas { display: block; }
+    #instructions {
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      color: white;
+      font-family: sans-serif;
+      user-select: none;
+      pointer-events: none;
+    }
+    #crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 10px;
+      height: 10px;
+      margin-left: -5px;
+      margin-top: -5px;
+      z-index: 10;
+      pointer-events: none;
+    }
+    #crosshair::before, #crosshair::after {
+      content: '';
+      position: absolute;
+      background: white;
+    }
+    #crosshair::before {
+      left: 4px;
+      top: 0;
+      width: 2px;
+      height: 10px;
+    }
+    #crosshair::after {
+      top: 4px;
+      left: 0;
+      width: 10px;
+      height: 2px;
+    }
+  </style>
+</head>
+<body>
+<div id="instructions">点击页面以锁定鼠标，拖动旋转视角，左键扔瓶子砸玻璃！</div>
+<div id="crosshair"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+
+<script>
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x222222);
+
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 1.6, 5);
+
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  const light = new THREE.HemisphereLight(0xffffff, 0x444444);
+  light.position.set(0, 20, 0);
+  scene.add(light);
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(20, 20),
+    new THREE.MeshStandardMaterial({color:0x555555})
+  );
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+
+  const world = new CANNON.World();
+  world.gravity.set(0, -9.82, 0);
+
+  const groundBody = new CANNON.Body({mass:0});
+  groundBody.addShape(new CANNON.Plane());
+  groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+  world.addBody(groundBody);
+
+  const bottleGeo = new THREE.BoxGeometry(0.3, 1, 0.3);
+  const bottleMat = new THREE.MeshStandardMaterial({color:0x8b0000});
+  const bottleShape = new CANNON.Box(new CANNON.Vec3(0.15, 0.5, 0.15));
+  const bottles = [];
+
+  const listener = new THREE.AudioListener();
+  camera.add(listener);
+  const breakSound = new THREE.Audio(listener);
+  const audioLoader = new THREE.AudioLoader();
+  audioLoader.load('https://cdn.jsdelivr.net/gh/jbrown/boom/audio/break.wav', buffer => {
+    breakSound.setBuffer(buffer);
+    breakSound.setVolume(0.5);
+  });
+
+  const armGroup = new THREE.Group();
+  const handMat = new THREE.MeshStandardMaterial({ color: 0xffcc99 });
+  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.3), handMat);
+  hand.position.set(0.25, -0.25, -0.5);
+  armGroup.add(hand);
+  const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.4, 0.15), handMat);
+  forearm.position.set(0.25, -0.45, -0.35);
+  armGroup.add(forearm);
+  camera.add(armGroup);
+  scene.add(camera);
+
+  // 添加玻璃窗
+  const glassGeo = new THREE.PlaneGeometry(2, 2);
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x88ccff, transparent: true, opacity: 0.4 });
+  const glassMesh = new THREE.Mesh(glassGeo, glassMat);
+  glassMesh.position.set(0, 1.5, -5);
+  scene.add(glassMesh);
+
+  const glassBody = new CANNON.Body({
+    mass: 0,
+    shape: new CANNON.Box(new CANNON.Vec3(1, 1, 0.05)),
+    position: new CANNON.Vec3(0, 1.5, -5)
+  });
+  world.addBody(glassBody);
+
+  let glassIntact = true;
+
+  function throwBottle() {
+    const mesh = new THREE.Mesh(bottleGeo, bottleMat);
+    const body = new CANNON.Body({
+      mass: 1,
+      shape: bottleShape,
+      position: new CANNON.Vec3(camera.position.x, camera.position.y, camera.position.z)
+    });
+
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    forward.multiplyScalar(15);
+    body.velocity.set(forward.x, forward.y, forward.z);
+
+    scene.add(mesh);
+    world.addBody(body);
+    bottles.push({ mesh, body });
+
+    body.addEventListener('collide', (e) => {
+      if (!breakSound.isPlaying) breakSound.play();
+
+      if (glassIntact && e.body === glassBody) {
+        destroyGlass();
+        glassIntact = false;
+      }
+
+      // 新增：酒瓶碰到地面后破碎
+      if (e.body === groundBody) {
+        // 先移除酒瓶mesh和物理body
+        scene.remove(mesh);
+        world.removeBody(body);
+
+        // 播放破碎声音
+        if (!breakSound.isPlaying) breakSound.play();
+
+        // 创建碎片
+        const shardGeo = new THREE.BoxGeometry(0.1, 0.1, 0.02);
+        const shardMat = new THREE.MeshStandardMaterial({ color: 0x8b0000, transparent: true, opacity: 0.6 });
+
+        for (let i = 0; i < 20; i++) {
+          const shard = new THREE.Mesh(shardGeo, shardMat);
+          shard.position.copy(mesh.position);
+          // 让碎片随机散开一点
+          shard.position.x += (Math.random() - 0.5) * 0.5;
+          shard.position.y += (Math.random() - 0.5) * 0.5;
+          shard.position.z += (Math.random() - 0.5) * 0.5;
+          scene.add(shard);
+
+          const shardBody = new CANNON.Body({
+            mass: 0.05,
+            shape: new CANNON.Box(new CANNON.Vec3(0.05, 0.05, 0.01)),
+            position: new CANNON.Vec3().copy(shard.position)
+          });
+          // 给碎片一个随机初速度，模拟散开效果
+          shardBody.velocity.set(
+            (Math.random() - 0.5) * 5,
+            (Math.random() - 0.5) * 5 + 2,
+            (Math.random() - 0.5) * 5
+          );
+
+          world.addBody(shardBody);
+          bottles.push({ mesh: shard, body: shardBody });
+        }
+      }
+    });
+  }
+
+  function destroyGlass() {
+    scene.remove(glassMesh);
+    world.removeBody(glassBody);
+    const shardGeo = new THREE.BoxGeometry(0.1, 0.1, 0.02);
+    const shardMat = new THREE.MeshStandardMaterial({ color: 0x88ccff, transparent: true, opacity: 0.5 });
+
+    for (let i = 0; i < 30; i++) {
+      const shard = new THREE.Mesh(shardGeo, shardMat);
+      shard.position.set(
+        glassBody.position.x + (Math.random() - 0.5),
+        glassBody.position.y + (Math.random() - 0.5),
+        glassBody.position.z + (Math.random() - 0.1)
+      );
+      scene.add(shard);
+
+      const shardBody = new CANNON.Body({
+        mass: 0.1,
+        shape: new CANNON.Box(new CANNON.Vec3(0.05, 0.05, 0.01)),
+        position: new CANNON.Vec3().copy(shard.position)
+      });
+      world.addBody(shardBody);
+      bottles.push({ mesh: shard, body: shardBody });
+    }
+  }
+
+  // 鼠标锁定控制
+  const controls = {
+    enabled: false,
+    yaw: 0,
+    pitch: 0
+  };
+
+  document.body.addEventListener('click', () => {
+    if (!controls.enabled) {
+      document.body.requestPointerLock();
+    }
+  });
+
+  document.addEventListener('pointerlockchange', () => {
+    controls.enabled = document.pointerLockElement === document.body;
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (controls.enabled) {
+      controls.yaw -= e.movementX * 0.002;
+      // controls.pitch -= e.movementY * 0.002; // 原代码注释掉了pitch
+      camera.rotation.y = controls.yaw;
+    }
+  });
+
+  document.addEventListener('mousedown', e => {
+    if (controls.enabled && e.button === 0) {
+      throwBottle();
+    }
+  });
+
+  // 动画循环
+  const clock = new THREE.Clock();
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const delta = clock.getDelta();
+    world.step(1/60, delta, 3);
+
+    bottles.forEach(({mesh, body}) => {
+      mesh.position.copy(body.position);
+      mesh.quaternion.copy(body.quaternion);
+    });
+
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // 窗口大小调整
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script>
+</body>
+</html>
