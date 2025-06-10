@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>发泄屋 Demo - 玻璃窗 + 可破坏碎片 + 酒瓶碰地破碎 + 酒瓶碎片清除</title>
+  <title>发泄屋 Demo - 玻璃窗 + 玻璃窗碎片清除 + 酒瓶碰地破碎 + 酒瓶碎片清除 + 上下左右视角</title>
   <style>
     body { margin: 0; overflow: hidden; cursor: crosshair; }
     canvas { display: block; }
@@ -92,9 +92,15 @@
   camera.add(listener);
   const breakSound = new THREE.Audio(listener);
   const audioLoader = new THREE.AudioLoader();
-  audioLoader.load('https://cdn.jsdelivr.net/gh/jbrown/boom/audio/break.wav', buffer => {
+  audioLoader.load('./broken-bottle-01.mp3', buffer => {
     breakSound.setBuffer(buffer);
-    breakSound.setVolume(0.5);
+    breakSound.setVolume(10);
+  });
+  // 加载玻璃破碎声音
+  const glassBreakSound = new THREE.Audio(listener);
+  audioLoader.load('./glass-breaking-sound-effect-01.mp3', buffer => {
+    glassBreakSound.setBuffer(buffer);
+    glassBreakSound.setVolume(10);
   });
 
   const armGroup = new THREE.Group();
@@ -221,6 +227,9 @@
   function destroyGlass() {
     scene.remove(glassMesh);
     world.removeBody(glassBody);
+
+    if (!glassBreakSound.isPlaying) glassBreakSound.play();
+
     const shardGeo = new THREE.BoxGeometry(0.1, 0.1, 0.02);
     const shardMat = new THREE.MeshStandardMaterial({ color: 0x88ccff, transparent: true, opacity: 0.5 });
 
@@ -247,6 +256,8 @@
         world.removeBody(shardBody);
       }, 1000);
     }
+
+    // createGlass();
   }
 
   // 鼠标锁定控制
